@@ -7,7 +7,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
+from einops import rearrange # rearrange用于将tensor的维度换位
 import math
 
 from typing import Optional, Tuple, Type
@@ -38,24 +38,24 @@ class ImageEncoderViT(nn.Module):
         global_attn_indexes: Tuple[int, ...] = (),
     ) -> None:
         """
-        Args:
-            img_size (int): Input image size.
-            patch_size (int): Patch size.
-            in_chans (int): Number of input image channels.
-            embed_dim (int): Patch embedding dimension.
-            depth (int): Depth of ViT.
-            num_heads (int): Number of attention heads in each ViT block.
-            mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
-            qkv_bias (bool): If True, add a learnable bias to query, key, value.
-            norm_layer (nn.Module): Normalization layer.
-            act_layer (nn.Module): Activation layer.
-            use_abs_pos (bool): If True, use absolute positional embeddings.
-            use_rel_pos (bool): If True, add relative positional embeddings to the attention map.
-            rel_pos_zero_init (bool): If True, zero initialize relative positional parameters.
-            window_size (int): Window size for window attention blocks.
-            global_attn_indexes (list): Indexes for blocks using global attention.
+        参数:
+            img_size (int): 输入图像大小(默认为1024)
+            patch_size (int): patch大小(默认为16)
+            in_chans (int): 输入图像通道数(默认为3)
+            embed_dim (int): patch嵌入维度(默认为768)
+            depth (int): ViT深度(默认为12)
+            mlp_ratio (float): mlp隐藏维度与嵌入维度的比例(默认为4.0)
+            qkv_bias (bool): 如果为True,则在query,key,value上添加可学习的偏置(默认为True)
+            norm_layer (nn.Module): 归一化层(默认为nn.LayerNorm)
+            act_layer (nn.Module): 激活层(默认为nn.GELU)
+            use_abs_pos (bool): 如果为True,则使用绝对位置嵌入(默认为True)
+            use_rel_pos (bool): 如果为True,则在注意力图中添加相对位置嵌入(默认为False)
+            rel_pos_zero_init (bool): 如果为True,则相对位置参数初始化为0(默认为True)
+            window_size (int): 窗口大小(默认为0)
+            global_attn_indexes (list): 使用全局注意力的块的索引(默认为())
         """
         super().__init__()
+
         self.img_size = img_size
         self.in_chans = in_chans
         self.args = args
@@ -65,7 +65,7 @@ class ImageEncoderViT(nn.Module):
             stride=(patch_size, patch_size),
             in_chans=in_chans,
             embed_dim=embed_dim,
-        )
+        ) # patch_embed.shape = [1, 64, 64, 3]
 
         self.pos_embed: Optional[nn.Parameter] = None
         if use_abs_pos:
@@ -74,8 +74,8 @@ class ImageEncoderViT(nn.Module):
                 torch.zeros(1, img_size // patch_size, img_size // patch_size, embed_dim)
             )
 
-        self.blocks = nn.ModuleList()
-        for i in range(depth):
+        self.blocks = nn.ModuleList() # blocks.shape = [12, 64, 64, 768]
+        for i in range(depth): # depth = 12
             block = Block(
                 args= self.args,
                 dim=embed_dim,
@@ -91,21 +91,21 @@ class ImageEncoderViT(nn.Module):
             )
             self.blocks.append(block)
 
-        self.neck = nn.Sequential(
-            nn.Conv2d(
+        self.neck = nn.Sequential( # neck.shape = [1, 64, 64, 256], 脖子是一个卷积层, 用于降维, 降维后的维度为256
+            nn.Conv2d( # 降维的卷积层
                 embed_dim,
                 out_chans,
                 kernel_size=1,
                 bias=False,
             ),
-            LayerNorm2d(out_chans),
-            nn.Conv2d(
+            LayerNorm2d(out_chans), # 降维后的维度进行归一化
+            nn.Conv2d( # 降维的卷积层
                 out_chans,
                 out_chans,
                 kernel_size=3,
                 padding=1,
                 bias=False,
-            ),
+            ), # 降维后的维度进行归一化
             LayerNorm2d(out_chans),
         )
 
@@ -123,7 +123,8 @@ class ImageEncoderViT(nn.Module):
 
 
 class Block(nn.Module):
-    """Transformer blocks with support of window attention and residual propagation blocks"""
+    """ 支持窗口注意力和残差传播块的Transformer块
+    Transformer blocks with support of window attention and residual propagation blocks"""
 
     def __init__(
         self,
@@ -141,31 +142,32 @@ class Block(nn.Module):
         input_size: Optional[Tuple[int, int]] = None,
     ) -> None:
         """
-        Args:
-            dim (int): Number of input channels.
-            num_heads (int): Number of attention heads in each ViT block.
-            mlp_ratio (float): Ratio of mlp hidden dim to embedding dim.
-            qkv_bias (bool): If True, add a learnable bias to query, key, value.
-            norm_layer (nn.Module): Normalization layer.
-            act_layer (nn.Module): Activation layer.
-            use_rel_pos (bool): If True, add relative positional embeddings to the attention map.
-            rel_pos_zero_init (bool): If True, zero initialize relative positional parameters.
-            window_size (int): Window size for window attention blocks. If it equals 0, then
-                use global attention.
-            input_size (tuple(int, int) or None): Input resolution for calculating the relative
-                positional parameter size.
+        参数:
+            args (argparse.Namespace): 命令行参数。
+            dim (int): 输入通道数。
+            num_heads (int): 每个ViT块中的注意力头数。
+            mlp_ratio (float): mlp隐藏维度与嵌入维度的比率。
+            qkv_bias (bool): 如果为True，则在查询、键、值中添加可学习的偏置。
+            norm_layer (nn.Module): 归一化层。
+            act_layer (nn.Module): 激活层。
+            use_rel_pos (bool): 如果为True，则在注意力图中添加相对位置嵌入。
+            rel_pos_zero_init (bool): 如果为True，则将相对位置参数初始化为零。
+            window_size (int): 窗口注意力块的窗口大小。如果等于0，则使用全局注意力。
+            input_size (tuple(int, int) or None): 用于计算相对位置参数大小的输入分辨率。
+        返回:
+            torch.Tensor: 输出特征图。
         """
         super().__init__()
         self.args = args
-        self.norm1 = norm_layer(dim)
-        self.attn = Attention(
+        self.norm1 = norm_layer(dim) # 归一化层(输入通道数). (64, 64, 768)
+        self.attn = Attention( # 多头注意力层: 1.计算Q,K,V 2.计算attention map 3.计算输出
             dim,
             num_heads=num_heads,
             qkv_bias=qkv_bias,
             use_rel_pos=use_rel_pos,
             rel_pos_zero_init=rel_pos_zero_init,
             input_size=input_size if window_size == 0 else (window_size, window_size),
-        )
+        ) # (64, 64, 768)
         self.MLP_Adapter = Adapter(dim, skip_connect=False)  # MLP-adapter, no skip connection
         self.Space_Adapter = Adapter(dim)  # with skip connection
         self.scale = scale
@@ -184,7 +186,7 @@ class Block(nn.Module):
             x, pad_hw = window_partition(x, self.window_size)
 
         ## 3d branch
-        if self.args.thd: 
+        if self.args.thd:
             hh, ww = x.shape[1], x.shape[2]
             depth = self.args.chunk
             xd = rearrange(x, '(b d) h w c -> (b h w) d c ', d=depth)
@@ -213,7 +215,10 @@ class Block(nn.Module):
 
 
 class Attention(nn.Module):
-    """Multi-head Attention block with relative position embeddings."""
+    """
+    Multi-head Attention block with relative position embeddings.
+    多头注意力块，带有相对位置嵌入。
+    """
 
     def __init__(
         self,
@@ -225,24 +230,25 @@ class Attention(nn.Module):
         input_size: Optional[Tuple[int, int]] = None,
     ) -> None:
         """
-        Args:
-            dim (int): Number of input channels.
-            num_heads (int): Number of attention heads.
-            qkv_bias (bool):  If True, add a learnable bias to query, key, value.
-            rel_pos (bool): If True, add relative positional embeddings to the attention map.
-            rel_pos_zero_init (bool): If True, zero initialize relative positional parameters.
-            input_size (tuple(int, int) or None): Input resolution for calculating the relative
-                positional parameter size.
+        参数:
+            dim (int): 输入通道数。
+            num_heads (int): 每个ViT块中的注意力头数。
+            qkv_bias (bool): 如果为True，则在查询、键、值中添加可学习的偏置。
+            use_rel_pos (bool): 如果为True，则在注意力图中添加相对位置嵌入。
+            rel_pos_zero_init (bool): 如果为True，则将相对位置参数初始化为零。
+            input_size (tuple(int, int) or None): 用于计算相对位置参数大小的输入分辨率。
+        返回:
+            torch.Tensor: 输出特征图。
         """
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
-        self.scale = head_dim**-0.5
+        self.scale = head_dim**-0.5 # 缩放因子
 
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.proj = nn.Linear(dim, dim)
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias) # 3个线性层，分别计算Q,K,V
+        self.proj = nn.Linear(dim, dim) # 投影层
 
-        self.use_rel_pos = use_rel_pos
+        self.use_rel_pos = use_rel_pos # 是否使用相对位置编码
         if self.use_rel_pos:
             assert (
                 input_size is not None
@@ -251,7 +257,7 @@ class Attention(nn.Module):
             self.rel_pos_h = nn.Parameter(torch.zeros(2 * input_size[0] - 1, head_dim))
             self.rel_pos_w = nn.Parameter(torch.zeros(2 * input_size[1] - 1, head_dim))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor: # 前传至 Attention
         B, H, W, _ = x.shape
         # qkv with shape (3, B, nHead, H * W, C)
         qkv = self.qkv(x).reshape(B, H * W, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
@@ -264,22 +270,23 @@ class Attention(nn.Module):
             attn = add_decomposed_rel_pos(attn, q, self.rel_pos_h, self.rel_pos_w, (H, W), (H, W))
 
         attn = attn.softmax(dim=-1)
-        x = (attn @ v).view(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
-        x = self.proj(x)
+        x = (attn @ v).view(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1) # 重组: (B, H, W, C)
+        x = self.proj(x) # 投影
 
-        return x
+        return x # 输出特征图
 
 
 def window_partition(x: torch.Tensor, window_size: int) -> Tuple[torch.Tensor, Tuple[int, int]]:
     """
     Partition into non-overlapping windows with padding if needed.
-    Args:
-        x (tensor): input tokens with [B, H, W, C].
-        window_size (int): window size.
+    必要时分区为不重叠的带有填充的窗口。
+    参数:
+        x (torch.Tensor): 输入令牌带有[B, H, W, C]。
+        window_size (int): 窗口大小。
+    返回:
+        windows: 分区后的窗口，带有[B * num_windows, window_size, window_size, C]。
+        (Hp, Wp): 分区前的填充高度和宽度
 
-    Returns:
-        windows: windows after partition with [B * num_windows, window_size, window_size, C].
-        (Hp, Wp): padded height and width before partition
     """
     B, H, W, C = x.shape
 
@@ -299,14 +306,14 @@ def window_unpartition(
 ) -> torch.Tensor:
     """
     Window unpartition into original sequences and removing padding.
-    Args:
-        windows (tensor): input tokens with [B * num_windows, window_size, window_size, C].
-        window_size (int): window size.
-        pad_hw (Tuple): padded height and width (Hp, Wp).
-        hw (Tuple): original height and width (H, W) before padding.
-
-    Returns:
-        x: unpartitioned sequences with [B, H, W, C].
+    窗口取消分区为原始序列并删除填充。
+    参数:
+        windows (torch.Tensor): 带有[B * num_windows, window_size, window_size, C]的输入令牌。
+        window_size (int): 窗口大小。
+        pad_hw (Tuple[int, int]): 填充高度和宽度(Hp, Wp)。
+        hw (Tuple[int, int]): 填充前的原始高度和宽度(H, W)。
+    返回:
+        x: 带有[B, H, W, C]的未分区的窗口。
     """
     Hp, Wp = pad_hw
     H, W = hw
@@ -321,15 +328,13 @@ def window_unpartition(
 
 def get_rel_pos(q_size: int, k_size: int, rel_pos: torch.Tensor) -> torch.Tensor:
     """
-    Get relative positional embeddings according to the relative positions of
-        query and key sizes.
-    Args:
-        q_size (int): size of query q.
-        k_size (int): size of key k.
-        rel_pos (Tensor): relative position embeddings (L, C).
-
-    Returns:
-        Extracted positional embeddings according to relative positions.
+    根据查询和键大小的相对位置获取相对位置嵌入。
+    参数:
+        q_size (int): 查询q的大小。
+        k_size (int): 键k的大小。
+        rel_pos (Tensor): 相对位置嵌入(L, C)。
+    返回:
+        根据相对位置提取的位置嵌入。
     """
     max_rel_dist = int(2 * max(q_size, k_size) - 1)
     # Interpolate rel pos if needed.
@@ -350,6 +355,8 @@ def get_rel_pos(q_size: int, k_size: int, rel_pos: torch.Tensor) -> torch.Tensor
     relative_coords = (q_coords - k_coords) + (k_size - 1) * max(q_size / k_size, 1.0)
 
     return rel_pos_resized[relative_coords.long()]
+
+
 
 
 def add_decomposed_rel_pos(
@@ -390,7 +397,15 @@ def add_decomposed_rel_pos(
 
     return attn
 
+
 def closest_numbers(target):
+    """
+    找到最接近的两个数字
+    参数:
+        target (int): 目标数字。
+    返回:
+        (a, b): 最接近的两个数字。
+    """
     a = int(target ** 0.5)
     b = a + 1
     while True:
@@ -403,7 +418,7 @@ def closest_numbers(target):
 
 
 class PatchEmbed(nn.Module):
-    """
+    """ 分片嵌入
     Image to Patch Embedding.
     """
 
@@ -416,16 +431,18 @@ class PatchEmbed(nn.Module):
         embed_dim: int = 768,
     ) -> None:
         """
-        Args:
-            kernel_size (Tuple): kernel size of the projection layer.
-            stride (Tuple): stride of the projection layer.
-            padding (Tuple): padding size of the projection layer.
-            in_chans (int): Number of input image channels.
-            embed_dim (int): Patch embedding dimension.
+        参数:
+            kernel_size (Tuple): 投影层的内核大小,默认为(16, 16)。
+            stride (Tuple): 投影层的步长,默认为(16, 16)。
+            padding (Tuple): 投影层的填充大小,默认为(0, 0)。
+            in_chans (int): 输入图像通道数,默认为3。
+            embed_dim (int): 分片嵌入维度,默认为768。
+        返回:
+            x (Tensor): 输入图像的分片嵌入。
         """
         super().__init__()
 
-        self.proj = nn.Conv2d(
+        self.proj = nn.Conv2d( # 2d卷积, 用于图像, 目的是将图像分片, 然后将每个分片映射到一个向量
             in_chans, embed_dim, kernel_size=kernel_size, stride=stride, padding=padding
         )
 
